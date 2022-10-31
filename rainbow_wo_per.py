@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
-from utils.replaybuffer_structure import NStepPREBuffer, NStepReplayBuffer
+from utils.replaybuffer_structure import NStepReplayBuffer
 from utils.network_structure import NoisyDuelingCategoricalNetwork
 
 """
@@ -83,12 +83,12 @@ class DQNAgent:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(self.device)
 
-        # PRE
+        # no PRE
         # 1-step
         self.beta = beta
         self.prior_eps = prior_eps
-        self.memory = NStepPREBuffer(
-            obs_dim, memory_size, batch_size, alpha=alpha
+        self.memory = NStepReplayBuffer(
+            obs_dim, memory_size, batch_size, n_step=1
         )
         # n-step
         self.use_n_step = True if n_step > 1 else False
@@ -148,33 +148,23 @@ class DQNAgent:
         return next_state, reward, done
 
     def update_model(self) -> float:
-        # PRE
-        samples = self.memory.sample_batch(self.beta)
-        weights = torch.FloatTensor(
-            samples["weights"].reshape(-1, 1)
-        ).to(self.device)
+        # no PRE
+        samples = self.memory.sample_batch()
         indices = samples["indices"]
-        elementwise_loss = self._compute_dqn_loss(samples, self.gamma)
-        loss = torch.mean(elementwise_loss * weights)
+        loss = self._compute_dqn_loss(samples, self.gamma)
         # samples = self.memory.sample_batch()
         # loss = self._compute_dqn_loss(samples)
         # N_step_learning
         if self.use_n_step:
             gamma = self.gamma ** self.n_step
             samples = self.memory_n.sample_batch_from_idxs(indices)
-            elementwise_loss_n_loss = self._compute_dqn_loss(samples, gamma)
-            elementwise_loss += elementwise_loss_n_loss
-            loss = torch.mean(elementwise_loss * weights)
+            n_loss = self._compute_dqn_loss(samples, gamma)
+            loss += n_loss
 
         self.optimizer.zero_grad()
         loss.backward()
         nn.utils.clip_grad_norm_(self.dqn.parameters(), 10.0)
         self.optimizer.step()
-
-        # PRE: update
-        loss_for_prior = elementwise_loss.detach().cpu().numpy()
-        new_priorities = loss_for_prior + self.prior_eps
-        self.memory.update_priorities(indices, new_priorities)
 
         # NoisyNet
         self.dqn.reset_noise()
@@ -182,7 +172,7 @@ class DQNAgent:
 
         return loss.item()
 
-    def train(self, num_frames: int, plotting_interval: int = 200) -> Tuple[list, list, list]:
+    def train(self, num_frames: int, plotting_interval: int = 200) -> Tuple[list, list]:
         self.is_test = False
         state = self.env.reset()[0]
         update_cnt = 0
@@ -196,10 +186,6 @@ class DQNAgent:
             next_state, reward, done = self.step(action)
             state = next_state
             score += reward
-
-            # PRE
-            franction = min(frame_idx / num_frames, 1.0)
-            self.beta = self.beta + franction * (1.0 - self.beta)
 
             if done:
                 state = self.env.reset()[0]
@@ -242,7 +228,6 @@ class DQNAgent:
 
     def load(self, path):
         self.dqn.load_state_dict(torch.load(path))
-        self.epsilon = 0.1
 
     def _compute_dqn_loss(self, samples: Dict[str, np.ndarray], gamma: float) -> torch.Tensor:
         device = self.device
@@ -282,13 +267,13 @@ class DQNAgent:
             )
         dist = self.dqn.dist(state)
         log_p = torch.log(dist[range(self.batch_size), action])
-        elementwise_loss = -(proj_dist * log_p).sum(1)
+        loss = -(proj_dist * log_p).sum(1).mean()
         # curr_q_value = self.dqn(state).gather(1, action)
         # next_q_value = self.dqn_target(next_state).max(dim=1, keepdim=True)[0].detach()
         # mask = 1 - done
         # target = (reward + self.gamma * next_q_value * mask).to(device)
         # loss = F.smooth_l1_loss(curr_q_value, target)
-        return elementwise_loss
+        return loss
 
     def _plot(self, frame_idx: int, scores: List[float], losses: List[float]):
         plt.figure(figsize=(20, 5))
@@ -327,14 +312,14 @@ if __name__ == "__main__":
     for i in range(5):
         agent = DQNAgent(env, memory_size, batch_size, target_update)
         scores, losses = agent.train(num_frames)
-        with open("./save/rainbow/scores_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
+        with open("./save/rainbow without per/scores_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
             f.writelines(str(scores))
-        with open("./save/rainbow/losses_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
+        with open("./save/rainbow without per/losses_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
             f.writelines(str(losses))
         # with open("./save/rainbow_dqn/epsilons_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
         #     f.writelines(str(epsilons))
-        agent.save("./save/rainbow/rainbow_" + str(i) + ".pkl")
+        agent.save("./save/rainbow without per/rainbow_" + str(i) + ".pkl")
     agent = DQNAgent(env, memory_size, batch_size, target_update)
-    agent.load("./save/rainbow/rainbow_4.pkl")
-    video_folder = "videos/rainbow"
+    agent.load("./save/rainbow without per/rainbow_4.pkl")
+    video_folder = "videos/rainbow without per"
     agent.test(video_folder=video_folder)

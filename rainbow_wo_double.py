@@ -182,7 +182,7 @@ class DQNAgent:
 
         return loss.item()
 
-    def train(self, num_frames: int, plotting_interval: int = 200) -> Tuple[list, list, list]:
+    def train(self, num_frames: int) -> Tuple[list, list]:
         self.is_test = False
         state = self.env.reset()[0]
         update_cnt = 0
@@ -255,8 +255,8 @@ class DQNAgent:
         # Categorical DQN
         delta_z = float(self.v_max - self.v_min) / (self.atom_size - 1)
         with torch.no_grad():
-            # Double DQN
-            next_action = self.dqn(next_state).argmax(1)
+            # no Double
+            next_action = self.dqn_target(next_state).argmax(1)
             next_dist = self.dqn_target.dist(next_state)
             next_dist = next_dist[range(self.batch_size), next_action]
 
@@ -327,14 +327,14 @@ if __name__ == "__main__":
     for i in range(5):
         agent = DQNAgent(env, memory_size, batch_size, target_update)
         scores, losses = agent.train(num_frames)
-        with open("./save/rainbow/scores_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
+        with open("./save/rainbow without double/scores_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
             f.writelines(str(scores))
-        with open("./save/rainbow/losses_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
+        with open("./save/rainbow without double/losses_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
             f.writelines(str(losses))
         # with open("./save/rainbow_dqn/epsilons_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
         #     f.writelines(str(epsilons))
-        agent.save("./save/rainbow/rainbow_" + str(i) + ".pkl")
+        agent.save("./save/rainbow without double/rainbow_" + str(i) + ".pkl")
     agent = DQNAgent(env, memory_size, batch_size, target_update)
-    agent.load("./save/rainbow/rainbow_4.pkl")
-    video_folder = "videos/rainbow"
+    agent.load("./save/rainbow without double/rainbow_4.pkl")
+    video_folder = "videos/rainbow without double"
     agent.test(video_folder=video_folder)

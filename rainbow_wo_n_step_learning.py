@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
-from utils.replaybuffer_structure import NStepPREBuffer, NStepReplayBuffer
+from utils.replaybuffer_structure import PrioritizedReplayBuffer
 from utils.network_structure import NoisyDuelingCategoricalNetwork
 
 """
@@ -87,16 +87,7 @@ class DQNAgent:
         # 1-step
         self.beta = beta
         self.prior_eps = prior_eps
-        self.memory = NStepPREBuffer(
-            obs_dim, memory_size, batch_size, alpha=alpha
-        )
-        # n-step
-        self.use_n_step = True if n_step > 1 else False
-        if self.use_n_step:
-            self.n_step = n_step
-            self.memory_n = NStepReplayBuffer(
-                obs_dim, memory_size, batch_size, n_step=n_step, gamma=gamma
-            )
+        self.memory = PrioritizedReplayBuffer(obs_dim, memory_size, batch_size, alpha)
 
         # Categorical DQN
         self.v_min = v_min
@@ -138,13 +129,7 @@ class DQNAgent:
         next_state, reward, done, _1, _2 = self.env.step(action)
         if not self.is_test:
             self.transition += [reward, next_state, done]
-            # N_step_learning
-            if self.use_n_step:
-                one_step_transition = self.memory_n.store(*self.transition)
-            else:
-                one_step_transition = self.transition
-            if one_step_transition:
-                self.memory.store(*one_step_transition)
+            self.memory.store(*self.transition)
         return next_state, reward, done
 
     def update_model(self) -> float:
@@ -156,15 +141,6 @@ class DQNAgent:
         indices = samples["indices"]
         elementwise_loss = self._compute_dqn_loss(samples, self.gamma)
         loss = torch.mean(elementwise_loss * weights)
-        # samples = self.memory.sample_batch()
-        # loss = self._compute_dqn_loss(samples)
-        # N_step_learning
-        if self.use_n_step:
-            gamma = self.gamma ** self.n_step
-            samples = self.memory_n.sample_batch_from_idxs(indices)
-            elementwise_loss_n_loss = self._compute_dqn_loss(samples, gamma)
-            elementwise_loss += elementwise_loss_n_loss
-            loss = torch.mean(elementwise_loss * weights)
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -182,7 +158,7 @@ class DQNAgent:
 
         return loss.item()
 
-    def train(self, num_frames: int, plotting_interval: int = 200) -> Tuple[list, list, list]:
+    def train(self, num_frames: int, plotting_interval: int = 200) -> Tuple[list, list]:
         self.is_test = False
         state = self.env.reset()[0]
         update_cnt = 0
@@ -327,14 +303,14 @@ if __name__ == "__main__":
     for i in range(5):
         agent = DQNAgent(env, memory_size, batch_size, target_update)
         scores, losses = agent.train(num_frames)
-        with open("./save/rainbow/scores_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
+        with open("./save/rainbow without n_step_learning/scores_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
             f.writelines(str(scores))
-        with open("./save/rainbow/losses_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
+        with open("./save/rainbow without n_step_learning/losses_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
             f.writelines(str(losses))
         # with open("./save/rainbow_dqn/epsilons_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
         #     f.writelines(str(epsilons))
-        agent.save("./save/rainbow/rainbow_" + str(i) + ".pkl")
+        agent.save("./save/rainbow without n_step_learning/rainbow_" + str(i) + ".pkl")
     agent = DQNAgent(env, memory_size, batch_size, target_update)
-    agent.load("./save/rainbow/rainbow_4.pkl")
-    video_folder = "videos/rainbow"
+    agent.load("./save/rainbow without n_step_learning/rainbow_4.pkl")
+    video_folder = "videos/rainbow without n_step_learning"
     agent.test(video_folder=video_folder)

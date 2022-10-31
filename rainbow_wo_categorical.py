@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
 from utils.replaybuffer_structure import NStepPREBuffer, NStepReplayBuffer
-from utils.network_structure import NoisyDuelingCategoricalNetwork
+from utils.network_structure import NoisyDuelingNetwork
 
 """
 requirements:
@@ -98,21 +98,9 @@ class DQNAgent:
                 obs_dim, memory_size, batch_size, n_step=n_step, gamma=gamma
             )
 
-        # Categorical DQN
-        self.v_min = v_min
-        self.v_max = v_max
-        self.atom_size = atom_size
-        self.support = torch.linspace(
-            self.v_min, self.v_max, self.atom_size
-        ).to(self.device)
-
         # networks: dqn, target_dqn
-        self.dqn = NoisyDuelingCategoricalNetwork(
-            obs_dim, action_dim, self.atom_size, self.support
-        ).to(self.device)
-        self.dqn_target = NoisyDuelingCategoricalNetwork(
-            obs_dim, action_dim, self.atom_size, self.support
-        ).to(self.device)
+        self.dqn = NoisyDuelingNetwork(obs_dim, action_dim).to(self.device)
+        self.dqn_target = NoisyDuelingNetwork(obs_dim, action_dim).to(self.device)
         self.dqn_target.load_state_dict(self.dqn.state_dict())
         self.dqn_target.eval()
 
@@ -182,7 +170,7 @@ class DQNAgent:
 
         return loss.item()
 
-    def train(self, num_frames: int, plotting_interval: int = 200) -> Tuple[list, list, list]:
+    def train(self, num_frames: int, plotting_interval: int = 200) -> Tuple[list, list]:
         self.is_test = False
         state = self.env.reset()[0]
         update_cnt = 0
@@ -251,44 +239,12 @@ class DQNAgent:
         action = torch.LongTensor(samples["acts"]).to(device)
         reward = torch.FloatTensor(samples["rews"].reshape(-1, 1)).to(device)
         done = torch.FloatTensor(samples["done"].reshape(-1, 1)).to(device)
-
-        # Categorical DQN
-        delta_z = float(self.v_max - self.v_min) / (self.atom_size - 1)
-        with torch.no_grad():
-            # Double DQN
-            next_action = self.dqn(next_state).argmax(1)
-            next_dist = self.dqn_target.dist(next_state)
-            next_dist = next_dist[range(self.batch_size), next_action]
-
-            t_z = reward + (1 - done) * gamma * self.support
-            t_z = t_z.clamp(min=self.v_min, max=self.v_max)
-            b = (t_z - self.v_min) / delta_z
-            l = b.floor().long()
-            u = b.ceil().long()
-            offset = (
-                torch.linspace(
-                    0, (self.batch_size - 1) * self.atom_size, self.batch_size
-                ).long()
-                .unsqueeze(1)
-                .expand(self.batch_size, self.atom_size)
-                .to(self.device)
-            )
-            proj_dist = torch.zeros(next_dist.size(), device=self.device)
-            proj_dist.view(-1).index_add_(
-                0, (l + offset).view(-1), (next_dist * (u.float() - b)).view(-1)
-            )
-            proj_dist.view(-1).index_add_(
-                0, (u + offset).view(-1), (next_dist * (b - l.float())).view(-1)
-            )
-        dist = self.dqn.dist(state)
-        log_p = torch.log(dist[range(self.batch_size), action])
-        elementwise_loss = -(proj_dist * log_p).sum(1)
-        # curr_q_value = self.dqn(state).gather(1, action)
-        # next_q_value = self.dqn_target(next_state).max(dim=1, keepdim=True)[0].detach()
-        # mask = 1 - done
-        # target = (reward + self.gamma * next_q_value * mask).to(device)
-        # loss = F.smooth_l1_loss(curr_q_value, target)
-        return elementwise_loss
+        curr_q_value = self.dqn(state).gather(1, action)
+        next_q_value = self.dqn_target(next_state).gather(1, self.dqn(next_state).argmax(dim=1, keepdim=True)).detach()
+        mask = 1 - done
+        target = (reward + self.gamma * next_q_value * mask).to(device)
+        loss = F.smooth_l1_loss(curr_q_value, target)
+        return loss
 
     def _plot(self, frame_idx: int, scores: List[float], losses: List[float]):
         plt.figure(figsize=(20, 5))
@@ -327,14 +283,14 @@ if __name__ == "__main__":
     for i in range(5):
         agent = DQNAgent(env, memory_size, batch_size, target_update)
         scores, losses = agent.train(num_frames)
-        with open("./save/rainbow/scores_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
+        with open("./save/rainbow without categorical/scores_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
             f.writelines(str(scores))
-        with open("./save/rainbow/losses_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
+        with open("./save/rainbow without categorical/losses_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
             f.writelines(str(losses))
         # with open("./save/rainbow_dqn/epsilons_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
         #     f.writelines(str(epsilons))
-        agent.save("./save/rainbow/rainbow_" + str(i) + ".pkl")
+        agent.save("./save/rainbow without categorical/rainbow_" + str(i) + ".pkl")
     agent = DQNAgent(env, memory_size, batch_size, target_update)
-    agent.load("./save/rainbow/rainbow_4.pkl")
-    video_folder = "videos/rainbow"
+    agent.load("./save/rainbow without categorical/rainbow_4.pkl")
+    video_folder = "videos/rainbow without categorical"
     agent.test(video_folder=video_folder)

@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
 from utils.replaybuffer_structure import NStepPREBuffer, NStepReplayBuffer
-from utils.network_structure import NoisyDuelingCategoricalNetwork
+from utils.network_structure import NoisyCategoricalNetwork
 
 """
 requirements:
@@ -107,10 +107,10 @@ class DQNAgent:
         ).to(self.device)
 
         # networks: dqn, target_dqn
-        self.dqn = NoisyDuelingCategoricalNetwork(
+        self.dqn = NoisyCategoricalNetwork(
             obs_dim, action_dim, self.atom_size, self.support
         ).to(self.device)
-        self.dqn_target = NoisyDuelingCategoricalNetwork(
+        self.dqn_target = NoisyCategoricalNetwork(
             obs_dim, action_dim, self.atom_size, self.support
         ).to(self.device)
         self.dqn_target.load_state_dict(self.dqn.state_dict())
@@ -168,7 +168,6 @@ class DQNAgent:
 
         self.optimizer.zero_grad()
         loss.backward()
-        nn.utils.clip_grad_norm_(self.dqn.parameters(), 10.0)
         self.optimizer.step()
 
         # PRE: update
@@ -327,14 +326,14 @@ if __name__ == "__main__":
     for i in range(5):
         agent = DQNAgent(env, memory_size, batch_size, target_update)
         scores, losses = agent.train(num_frames)
-        with open("./save/rainbow/scores_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
+        with open("./save/rainbow without dueling/scores_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
             f.writelines(str(scores))
-        with open("./save/rainbow/losses_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
+        with open("./save/rainbow without dueling/losses_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
             f.writelines(str(losses))
         # with open("./save/rainbow_dqn/epsilons_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
         #     f.writelines(str(epsilons))
-        agent.save("./save/rainbow/rainbow_" + str(i) + ".pkl")
+        agent.save("./save/rainbow without dueling/rainbow_" + str(i) + ".pkl")
     agent = DQNAgent(env, memory_size, batch_size, target_update)
-    agent.load("./save/rainbow/rainbow_4.pkl")
-    video_folder = "videos/rainbow"
+    agent.load("./save/rainbow without dueling/rainbow_4.pkl")
+    video_folder = "videos/rainbow without dueling"
     agent.test(video_folder=video_folder)

@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
 from utils.replaybuffer_structure import NStepPREBuffer, NStepReplayBuffer
-from utils.network_structure import NoisyDuelingCategoricalNetwork
+from utils.network_structure import DuelingCategoricalNetwork
 
 """
 requirements:
@@ -50,9 +50,9 @@ class DQNAgent:
             # 模型参数硬更新周期
             target_update: int,
             # ε-greedy
-            # epsilon_decay: float,
-            # max_epsilon: float = 1.0,
-            # min_epsilon: float = 0.1,
+            epsilon_decay: float,
+            max_epsilon: float = 1.0,
+            min_epsilon: float = 0.1,
             # 折扣因子
             gamma: float = 0.99,
             # PRE
@@ -72,10 +72,10 @@ class DQNAgent:
         self.env = env
         # self.memory = ReplayBuffer(obs_dim, memory_size, batch_size)
         self.batch_size = batch_size
-        # self.epsilon = max_epsilon
-        # self.epsilon_decay = epsilon_decay
-        # self.max_epsilon = max_epsilon
-        # self.min_epsilon = min_epsilon
+        self.epsilon = max_epsilon
+        self.epsilon_decay = epsilon_decay
+        self.max_epsilon = max_epsilon
+        self.min_epsilon = min_epsilon
         self.target_update = target_update
         self.gamma = gamma
 
@@ -107,10 +107,10 @@ class DQNAgent:
         ).to(self.device)
 
         # networks: dqn, target_dqn
-        self.dqn = NoisyDuelingCategoricalNetwork(
+        self.dqn = DuelingCategoricalNetwork(
             obs_dim, action_dim, self.atom_size, self.support
         ).to(self.device)
-        self.dqn_target = NoisyDuelingCategoricalNetwork(
+        self.dqn_target = DuelingCategoricalNetwork(
             obs_dim, action_dim, self.atom_size, self.support
         ).to(self.device)
         self.dqn_target.load_state_dict(self.dqn.state_dict())
@@ -126,10 +126,12 @@ class DQNAgent:
         self.is_test = False
 
     def select_action(self, state: np.ndarray) -> np.ndarray:
-        # NoisyNet
-        selected_action = self.dqn(torch.FloatTensor(state).to(self.device)).argmax()
-        selected_action = selected_action.detach().cpu().numpy()
-
+        # 从动作空间中使用 ε-greedy 策略选择 action
+        if self.epsilon > np.random.random():
+            selected_action = self.env.action_space.sample()
+        else:
+            selected_action = self.dqn(torch.FloatTensor(state).to(self.device)).argmax()
+            selected_action = selected_action.detach().cpu().numpy()
         if not self.is_test:
             self.transition = [state, selected_action]
         return selected_action
@@ -176,17 +178,13 @@ class DQNAgent:
         new_priorities = loss_for_prior + self.prior_eps
         self.memory.update_priorities(indices, new_priorities)
 
-        # NoisyNet
-        self.dqn.reset_noise()
-        self.dqn_target.reset_noise()
-
         return loss.item()
 
     def train(self, num_frames: int, plotting_interval: int = 200) -> Tuple[list, list, list]:
         self.is_test = False
         state = self.env.reset()[0]
         update_cnt = 0
-        # epsilons = []
+        epsilons = []
         losses = []
         scores = []
         score = 0
@@ -209,16 +207,16 @@ class DQNAgent:
                 loss = self.update_model()
                 losses.append(loss)
                 update_cnt += 1
-                # self.epsilon = max(self.min_epsilon,
-                #                    self.epsilon - (self.max_epsilon - self.min_epsilon) * self.epsilon_decay)
-                # epsilons.append(self.epsilon)
+                self.epsilon = max(self.min_epsilon,
+                                   self.epsilon - (self.max_epsilon - self.min_epsilon) * self.epsilon_decay)
+                epsilons.append(self.epsilon)
                 if update_cnt % self.target_update == 0:
                     self.dqn_target.load_state_dict(self.dqn.state_dict())
             # if frame_idx % plotting_interval == 0:
             #     self._plot(frame_idx, scores, losses, epsilons)
         self.env.close()
-        self._plot(num_frames, scores, losses)
-        return scores, losses
+        self._plot(num_frames, scores, losses, epsilons)
+        return scores, losses, epsilons
 
     def test(self, video_folder: str) -> None:
         self.is_test = True
@@ -290,7 +288,7 @@ class DQNAgent:
         # loss = F.smooth_l1_loss(curr_q_value, target)
         return elementwise_loss
 
-    def _plot(self, frame_idx: int, scores: List[float], losses: List[float]):
+    def _plot(self, frame_idx: int, scores: List[float], losses: List[float], epsilons: List[float]):
         plt.figure(figsize=(20, 5))
         plt.subplot(131)
         plt.title('frame %s. score: %s' % (frame_idx, np.mean(scores[-10:])))
@@ -298,9 +296,9 @@ class DQNAgent:
         plt.subplot(132)
         plt.title('loss')
         plt.plot(losses)
-        # plt.subplot(133)
-        # plt.title('epsilons')
-        # plt.plot(epsilons)
+        plt.subplot(133)
+        plt.title('epsilons')
+        plt.plot(epsilons)
         plt.show()
 
 
@@ -323,18 +321,18 @@ if __name__ == "__main__":
     memory_size = 10000
     batch_size = 128
     target_update = 100
-    # epsilon_decay = 1 / 2000
+    epsilon_decay = 1 / 2000
     for i in range(5):
-        agent = DQNAgent(env, memory_size, batch_size, target_update)
-        scores, losses = agent.train(num_frames)
-        with open("./save/rainbow/scores_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
+        agent = DQNAgent(env, memory_size, batch_size, target_update, epsilon_decay=epsilon_decay)
+        scores, losses, epsilons = agent.train(num_frames)
+        with open("./save/rainbow without noisy_net/scores_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
             f.writelines(str(scores))
-        with open("./save/rainbow/losses_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
+        with open("./save/rainbow without noisy_net/losses_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
             f.writelines(str(losses))
-        # with open("./save/rainbow_dqn/epsilons_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
-        #     f.writelines(str(epsilons))
-        agent.save("./save/rainbow/rainbow_" + str(i) + ".pkl")
-    agent = DQNAgent(env, memory_size, batch_size, target_update)
-    agent.load("./save/rainbow/rainbow_4.pkl")
-    video_folder = "videos/rainbow"
+        with open("./save/rainbow without noisy_net/epsilons_" + str(i) + ".txt", encoding="utf-8", mode="a") as f:
+            f.writelines(str(epsilons))
+        agent.save("./save/rainbow without noisy_net/rainbow_" + str(i) + ".pkl")
+    agent = DQNAgent(env, memory_size, batch_size, target_update, epsilon_decay=epsilon_decay)
+    agent.load("./save/rainbow without noisy_net/rainbow_4.pkl")
+    video_folder = "videos/rainbow without noisy_net"
     agent.test(video_folder=video_folder)
