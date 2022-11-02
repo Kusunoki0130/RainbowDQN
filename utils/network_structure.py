@@ -136,6 +136,9 @@ class NoisyNetwork(nn.Module):
 
 
 class CategoricalNetwork(nn.Module):
+    """
+    Categorical 网络结构
+    """
 
     def __init__(self, in_dim: int, out_dim: int, atom_size: int, support: torch.Tensor):
         """Initialization."""
@@ -169,6 +172,9 @@ class CategoricalNetwork(nn.Module):
 
 
 class NoisyDuelingCategoricalNetwork(nn.Module):
+    """
+    Rainbow 网络结构
+    """
 
     def __init__(self, in_dim: int, out_dim: int, atom_size: int, support: torch.Tensor):
         super(NoisyDuelingCategoricalNetwork, self).__init__()
@@ -216,6 +222,9 @@ class NoisyDuelingCategoricalNetwork(nn.Module):
 
 
 class NoisyCategoricalNetwork(nn.Module):
+    """
+    no dueling
+    """
 
     def __init__(self, in_dim: int, out_dim: int, atom_size: int, support: torch.Tensor):
         super(NoisyCategoricalNetwork, self).__init__()
@@ -251,6 +260,9 @@ class NoisyCategoricalNetwork(nn.Module):
 
 
 class DuelingCategoricalNetwork(nn.Module):
+    """
+    no noisy
+    """
 
     def __init__(self, in_dim: int, out_dim: int, atom_size: int, support: torch.Tensor):
         super(DuelingCategoricalNetwork, self).__init__()
@@ -297,6 +309,9 @@ class DuelingCategoricalNetwork(nn.Module):
 
 
 class NoisyDuelingNetwork(nn.Module):
+    """
+    no categorial
+    """
 
     def __init__(self, in_dim: int, out_dim: int):
         super(NoisyDuelingNetwork, self).__init__()
