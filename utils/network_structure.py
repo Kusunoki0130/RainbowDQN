@@ -213,3 +213,117 @@ class NoisyDuelingCategoricalNetwork(nn.Module):
         self.advantage_layer.reset_noise()
         self.value_hidden_layer.reset_noise()
         self.value_layer.reset_noise()
+
+
+class NoisyCategoricalNetwork(nn.Module):
+
+    def __init__(self, in_dim: int, out_dim: int, atom_size: int, support: torch.Tensor):
+        super(NoisyCategoricalNetwork, self).__init__()
+
+        self.support = support
+        self.out_dim = out_dim
+        self.atom_size = atom_size
+
+        self.feature_layer = nn.Sequential(
+            nn.Linear(in_dim, 128),
+            nn.ReLU()
+        )
+        self.noisy_layer_1 = NoisyLinear(128, 128)
+        self.noisy_layer_2 = NoisyLinear(128, out_dim * atom_size)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward method implementation."""
+        dist = self.dist(x)
+        q = torch.sum(dist * self.support, dim=2)
+        return q
+
+    def dist(self, x: torch.Tensor) -> torch.Tensor:
+        feature = self.feature_layer(x)
+        noisy_1 = F.relu(self.noisy_layer_1(feature))
+        q_atoms = self.noisy_layer_2(noisy_1).view(-1, self.out_dim, self.atom_size)
+        dist = F.softmax(q_atoms, dim=-1)
+        dist = dist.clamp(min=1e-3)  # for avoiding nans
+        return dist
+
+    def reset_noise(self):
+        self.noisy_layer_1.reset_noise()
+        self.noisy_layer_2.reset_noise()
+
+
+class DuelingCategoricalNetwork(nn.Module):
+
+    def __init__(self, in_dim: int, out_dim: int, atom_size: int, support: torch.Tensor):
+        super(DuelingCategoricalNetwork, self).__init__()
+
+        self.support = support
+        self.out_dim = out_dim
+        self.atom_size = atom_size
+
+        self.feature_layer = nn.Sequential(
+            nn.Linear(in_dim, 128),
+            nn.ReLU()
+        )
+
+        self.advantage_layer = nn.Sequential (
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, out_dim * atom_size)
+        )
+
+        self.value_layer = nn.Sequential (
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, atom_size)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward method implementation."""
+        dist = self.dist(x)
+        q = torch.sum(dist * self.support, dim=2)
+        return q
+
+    def dist(self, x: torch.Tensor) -> torch.Tensor:
+        feature = self.feature_layer(x)
+        advantage = self.advantage_layer(feature).view(
+            -1, self.out_dim, self.atom_size
+        )
+        value = self.value_layer(feature).view(
+            -1, 1, self.atom_size
+        )
+        q_atoms = value + advantage - advantage.mean(dim=1, keepdim=True)
+        dist = F.softmax(q_atoms, dim=-1)
+        dist = dist.clamp(min=1e-3)  # for avoiding nans
+        return dist
+
+
+class NoisyDuelingNetwork(nn.Module):
+
+    def __init__(self, in_dim: int, out_dim: int):
+        super(NoisyDuelingNetwork, self).__init__()
+
+        self.feature_layer = nn.Sequential(
+            nn.Linear(in_dim, 128),
+            nn.ReLU()
+        )
+        self.advantage_hidden_layer = NoisyLinear(128, 128)
+        self.advantage_layer = NoisyLinear(128, out_dim)
+
+        self.value_hidden_layer = NoisyLinear(128, 128)
+        self.value_layer = NoisyLinear(128, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward method implementation."""
+        feature = self.feature_layer(x)
+        advantage_hidden = F.relu(self.advantage_hidden_layer(feature))
+        advantage = self.advantage_layer(advantage_hidden)
+        value_hidden = F.relu(self.value_hidden_layer(feature))
+        value = self.value_layer(value_hidden)
+
+        q = value + advantage - advantage.mean(dim=-1, keepdim=True)
+        return q
+
+    def reset_noise(self):
+        self.advantage_hidden_layer.reset_noise()
+        self.advantage_layer.reset_noise()
+        self.value_hidden_layer.reset_noise()
+        self.value_layer.reset_noise()
